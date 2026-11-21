@@ -38,3 +38,8 @@ ORDER BY day;
 -- Q5: Two sources disagree - successful txns vs settled txns
 SELECT (SELECT COUNT(*) FROM transactions WHERE status = 'SUCCESS') AS txn_source_success,
        (SELECT SUM(txn_count) FROM settlements) AS settlement_source_count;
+
+-- Q6: Deduplicated success count (each txn_id counted once)
+SELECT COUNT(DISTINCT txn_id) AS unique_success
+FROM transactions
+WHERE status = 'SUCCESS';
