@@ -75,19 +75,31 @@ def render_answer(out):
 
     res = out.get("analysis")
     if res and res["metric"] == "success_rate":
+        d = res["drivers"]
         c1, c2 = st.columns(2)
-        c1.plotly_chart(chart_weekly(res["weekly_trend"], res["windows"]), width="stretch")
-        c2.plotly_chart(chart_mix_rate(res["drivers"]), width="stretch")
+        c1.plotly_chart(chart_weekly(res["weekly_trend"], res["windows"]), width="stretch", theme=None)
+        c1.caption("**How to read:** each dot is one week's success rate. Orange = the period you asked "
+                   "about. A sudden drop after a flat line means something changed that week.")
+        c2.plotly_chart(chart_mix_rate(d), width="stretch", theme=None)
+        c2.caption(f"**How to read:** the total change ({d['delta_pp']} pts) split two ways, once per "
+                   "dimension. Blue = traffic moved between segments (mix). Orange = segments themselves "
+                   "got worse or better (rate). A dimension with a big blue bar explains part of the change "
+                   "by traffic shifting.")
         c3, c4 = st.columns(2)
-        m = res["drivers"].get("mix_driver")
+        m = d.get("mix_driver")
         if m:
             c3.plotly_chart(chart_segments(res["by_dimension"][m["dimension"]], m["dimension"]),
-                            width="stretch")
+                            width="stretch", theme=None)
+            c3.caption(f"**How to read:** blue = share of traffic before, orange = after. "
+                       f"{m['segment']} grew from {m['share_prev_pct']}% to {m['share_cur_pct']}%; its success "
+                       f"rate ({m['rate_cur_pct']}%) is below average, so more traffic there pulls the total down.")
         if res.get("drilldown"):
             dd = res["drilldown"]
-            c4.plotly_chart(chart_drill(dd["daily"], dd["segment"]), width="stretch")
+            c4.plotly_chart(chart_drill(dd["daily"], dd["segment"]), width="stretch", theme=None)
+            c4.caption(f"**How to read:** daily success rate of {dd['segment']} (orange) vs all others (blue). "
+                       "Where the orange line falls far below the blue one, that segment had its own problem.")
     elif res:
-        st.plotly_chart(chart_weekly(res["weekly_trend"], res["windows"]), width="stretch")
+        st.plotly_chart(chart_weekly(res["weekly_trend"], res["windows"]), width="stretch", theme=None)
 
     st.markdown("### ② Facts *(computed by code from executed queries)*")
     st.dataframe(pd.DataFrame([{k: f[k] for k in ["id", "text", "dataset", "filters", "window", "query_ids"]}
@@ -96,7 +108,7 @@ def render_answer(out):
         if "table" in f:
             fig = chart_table(f["table"], f["text"].split(":")[0])
             if fig is not None:
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, width="stretch", theme=None)
             st.caption(f"{f['id']} result table")
             st.dataframe(f["table"], hide_index=True)
 

@@ -7,16 +7,19 @@ import pandas as pd
 import plotly.graph_objects as go
 
 BLUE, ORANGE = "#2a78d6", "#eb6834"          # categorical slots 1 and 2 (validated palette)
-INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e6e5e1"
+INK, TEXT, GRID = "#0b0b0b", "#333333", "#e6e5e1"   # dark text on a white card: readable in light AND dark mode
 
 
 def base_layout(fig, title, height=320, y_title=None):
-    fig.update_layout(title=dict(text=title, font=dict(size=15, color=INK)), height=height,
-                      margin=dict(l=20, r=40, t=70, b=20), plot_bgcolor="white", paper_bgcolor="white",
-                      font=dict(color=MUTED), hovermode="x unified",
-                      legend=dict(orientation="h", y=1.12, x=0))
-    fig.update_xaxes(showgrid=False, linecolor=GRID, automargin=True)
-    fig.update_yaxes(gridcolor=GRID, zeroline=False, title=y_title, automargin=True)
+    fig.update_layout(title=dict(text=title, font=dict(size=16, color=INK)), height=height,
+                      margin=dict(l=20, r=40, t=105, b=20), plot_bgcolor="white", paper_bgcolor="white",
+                      font=dict(size=13, color=TEXT), hovermode="x unified",
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,      # above the plot area,
+                                  font=dict(size=13, color=TEXT)))                   # never on top of the data
+    fig.update_xaxes(showgrid=False, linecolor=GRID, automargin=True, tickfont=dict(size=12, color=TEXT),
+                     title_font=dict(size=13, color=TEXT))
+    fig.update_yaxes(gridcolor=GRID, zeroline=False, title=y_title, automargin=True,
+                     tickfont=dict(size=12, color=TEXT), title_font=dict(size=13, color=TEXT))
     return fig
 
 
@@ -24,7 +27,7 @@ def chart_weekly(trend, windows):
     """One line; weeks inside the current period are highlighted in orange and labelled."""
     t = trend.copy()
     cur = windows["current"]
-    t["label"] = "Wk of " + pd.to_datetime(t["week_start"]).dt.strftime("%d %b")
+    t["label"] = pd.to_datetime(t["week_start"]).dt.strftime("%d %b")       # week starting (Monday)
     in_cur = (t["week_start"] >= cur[0]) & (t["week_start"] <= cur[1])
     fig = go.Figure(go.Scatter(
         x=t["label"], y=t["success_rate"], mode="lines+markers+text",
@@ -33,7 +36,9 @@ def chart_weekly(trend, windows):
         text=[f"{v:.2f}%" if c else "" for v, c in zip(t["success_rate"], in_cur)],
         textposition="bottom center", cliponaxis=False,
         hovertemplate="%{x}<br>Success rate %{y:.2f}%<extra></extra>"))
-    return base_layout(fig, "Weekly success rate (orange = current period)", y_title="Success rate (%)")
+    fig = base_layout(fig, "Weekly success rate (orange = current period)", y_title="Success rate (%)")
+    fig.update_xaxes(title="week starting (Monday)")
+    return fig
 
 
 def chart_mix_rate(drivers):
