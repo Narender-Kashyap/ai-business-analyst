@@ -10,10 +10,13 @@ BLUE, ORANGE = "#2a78d6", "#eb6834"          # categorical slots 1 and 2 (valida
 INK, TEXT, GRID = "#0b0b0b", "#333333", "#e6e5e1"   # dark text on a white card: readable in light AND dark mode
 
 
-def base_layout(fig, title, height=320, y_title=None):
+def base_layout(fig, title, height=320, y_title=None, hovermode="x unified"):
+    """Shared style. hovermode: 'x unified' for lines (one box per date), 'closest' for bars."""
     fig.update_layout(title=dict(text=title, font=dict(size=16, color=INK)), height=height,
                       margin=dict(l=20, r=40, t=105, b=20), plot_bgcolor="white", paper_bgcolor="white",
-                      font=dict(size=13, color=TEXT), hovermode="x unified",
+                      font=dict(size=13, color=TEXT), hovermode=hovermode,
+                      hoverlabel=dict(bgcolor="white", bordercolor="#999999",
+                                      font=dict(size=13, color=INK)),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,      # above the plot area,
                                   font=dict(size=13, color=TEXT)))                   # never on top of the data
     fig.update_xaxes(showgrid=False, linecolor=GRID, automargin=True, tickfont=dict(size=12, color=TEXT),
@@ -50,8 +53,10 @@ def chart_mix_rate(drivers):
     fig.add_bar(y=dims["dimension"], x=dims["rate_effect_pp"], name="Rate effect (segments got worse/better)",
                 orientation="h", marker_color=ORANGE, texttemplate="%{x:.2f}", textposition="outside",
                 cliponaxis=False)
-    fig.update_layout(barmode="group", bargap=0.3, bargroupgap=0.1, hovermode="y unified")
-    fig = base_layout(fig, f"Change of {drivers['delta_pp']} pp = mix + rate (per dimension)", height=320)
+    fig.update_traces(hovertemplate="<b>%{y}</b><br>%{fullData.name}: %{x:.2f} pts<extra></extra>")
+    fig.update_layout(barmode="group", bargap=0.3, bargroupgap=0.1)
+    fig = base_layout(fig, f"Change of {drivers['delta_pp']} pp = mix + rate (per dimension)", height=320,
+                      hovermode="closest")
     values = dims[["mix_effect_pp", "rate_effect_pp"]].to_numpy()
     low, high = min(values.min(), 0), max(values.max(), 0)       # works for a rise AND a decline
     pad = 0.25 * (high - low) + 0.1                              # room for the value labels
@@ -63,11 +68,14 @@ def chart_segments(table, dim):
     t = table.sort_values("share_cur")
     fig = go.Figure()
     fig.add_bar(y=t["segment"], x=100 * t["share_prev"], name="Previous period", orientation="h",
-                marker_color=BLUE, hovertemplate="%{y}: %{x:.1f}% of attempts<extra>previous</extra>")
+                marker_color=BLUE,
+                hovertemplate="<b>%{y}</b><br>Previous period: %{x:.1f}% of attempts<extra></extra>")
     fig.add_bar(y=t["segment"], x=100 * t["share_cur"], name="Current period", orientation="h",
-                marker_color=ORANGE, hovertemplate="%{y}: %{x:.1f}% of attempts<extra>current</extra>")
-    fig.update_layout(barmode="group", hovermode="y unified")
-    return base_layout(fig, f"Traffic share by {dim} (% of resolved attempts)", height=300)
+                marker_color=ORANGE,
+                hovertemplate="<b>%{y}</b><br>Current period: %{x:.1f}% of attempts<extra></extra>")
+    fig.update_layout(barmode="group")
+    # "closest": one tooltip for the bar under the mouse (unified mode mixed up grouped bars)
+    return base_layout(fig, f"Traffic share by {dim} (% of resolved attempts)", height=300, hovermode="closest")
 
 
 def chart_drill(daily, segment):
@@ -75,7 +83,8 @@ def chart_drill(daily, segment):
     for name, color in [(segment, ORANGE), ("all others", BLUE)]:
         d = daily[daily["segment"] == name]
         fig.add_scatter(x=d["day"], y=d["success_rate"], mode="lines+markers", name=name,
-                        line=dict(color=color, width=2), marker=dict(size=8))
+                        line=dict(color=color, width=2), marker=dict(size=8),
+                        hovertemplate=f"{name}: %{{y:.1f}}% success<extra></extra>")
     return base_layout(fig, f"Daily success rate: {segment} vs all others", y_title="Success rate (%)")
 
 
@@ -94,6 +103,6 @@ def chart_table(df, title):
     t = df.sort_values(value)
     fig = go.Figure(go.Bar(y=t[label].astype(str), x=t[value], orientation="h", marker_color=BLUE,
                            texttemplate="%{x:,.2f}", textposition="outside", cliponaxis=False,
-                           hovertemplate="%{y}: %{x:,.2f}<extra></extra>"))
-    fig.update_layout(hovermode="y unified")
-    return base_layout(fig, f"{title} ({value} by {label})", height=max(220, 40 * len(t) + 100))
+                           hovertemplate="<b>%{y}</b><br>%{x:,.2f}<extra></extra>"))
+    return base_layout(fig, f"{title} ({value} by {label})", height=max(220, 40 * len(t) + 100),
+                       hovermode="closest")
