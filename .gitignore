@@ -9,3 +9,6 @@ __pycache__/
 # Generated / runtime
 data/*.db
 traces/
+
+# Personal study notes (not part of submission)
+INTERVIEW_NOTES.md
