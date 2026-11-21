@@ -49,6 +49,9 @@ def render_answer(out):
         st.info(f"**Please clarify:** {out['message']}")
     elif status in ("query_failed", "error"):
         st.error(f"**Could not answer.** {out['message']}")
+        if out.get("error_details"):
+            with st.expander("Technical details"):
+                st.code("\n".join(out["error_details"]), language=None)
 
     plan = out.get("plan")
     if plan:
@@ -70,8 +73,11 @@ def render_answer(out):
     n = out["narrative"] or {}
     st.subheader(n.get("headline", ""))
     if out["number_check"]:
-        st.warning(f"⚠️ Number check: {len(out['number_check'])} item(s) in the AI's wording could not be "
-                   f"matched to a computed fact - marked as unverified below.")
+        listed = "; ".join(
+            f"{p['number']:,.2f}".rstrip("0").rstrip(".") + f" ({p['where']})" if isinstance(p["number"], float)
+            else f"{p['number']} ({p['where']}, {p['issue']})" for p in out["number_check"])
+        st.warning(f"⚠️ Number check: {len(out['number_check'])} number(s) in the AI's wording could not be "
+                   f"matched to a fact computed by code, so treat them as unverified: {listed}.")
     else:
         st.success("✅ Number check: every number in the AI's wording matches a fact computed from the queries.")
 
@@ -264,6 +270,8 @@ with tab_ask:
     if st.button("Ask", type="primary") and question.strip():
         with st.spinner("Planning, validating, querying, checking data quality…"):
             st.session_state["last"] = cached_ask(question.strip(), role)
+            if st.session_state["last"]["status"] == "error":
+                cached_ask.clear()                   # never cache a failure: asking again should really retry
     if st.session_state.get("last"):
         render_answer(st.session_state["last"])
 

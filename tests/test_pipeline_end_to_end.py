@@ -116,3 +116,14 @@ def test_missing_api_key_gives_a_clear_message(monkeypatch):
     monkeypatch.setattr(llm, "_client", None)
     out = pipeline.ask("Why did the success rate drop?", "central_analyst")
     assert out["status"] == "error" and "GEMINI_API_KEY is not set" in out["message"]
+
+
+def test_new_dimension_added_in_config_needs_no_code_change(use_fake_llm, monkeypatch):
+    import analysis
+    dims = dict(analysis.DIMENSIONS)
+    dims["hour_of_day"] = {"join": "", "column": "CAST(strftime('%H', t.txn_ts) AS INTEGER)"}
+    monkeypatch.setattr(analysis, "DIMENSIONS", dims)
+    use_fake_llm(plan("explain_change", metric="success_rate"))
+    out = pipeline.ask("Why did the success rate drop last week?", "central_analyst")
+    assert out["status"] == "ok", out.get("message")
+    assert "hour_of_day" in out["analysis"]["by_dimension"]

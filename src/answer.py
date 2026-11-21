@@ -13,10 +13,17 @@ import pandas as pd
 import sqlglot
 from sqlglot import exp
 
+import analysis
 from llm import generate_json
 
-DIM_TABLE = {"payment_method": "payment_methods", "bank": "banks",
-             "merchant_category": "merchants", "region": "merchants"}
+
+
+def _dataset(dim):
+    """Tables behind a segment dimension, read from its join in the semantic layer, so a new
+    dimension added in YAML needs no code change here. hour_of_day (no join) -> transactions_clean."""
+    tables = re.findall(r"JOIN\s+(\w+)", analysis.DIMENSIONS[dim]["join"], flags=re.IGNORECASE)
+    return " + ".join(["transactions_clean"] + tables)
+
 ANOMALY_GAP_PP = 10          # a day is 'anomalous' if the segment is >10 pts below all others
 
 
@@ -52,7 +59,7 @@ def facts_for_change(result):
             f"({_fmt(round(cur - prev, 2))}).", ["seg_payment_method"], "transactions_clean")
         for dim, info in result["drivers"]["top_change_by_dimension"].items():
             add(f"By {dim}, the largest change in {metric} was {info['segment']} ({_fmt(info['change'])}).",
-                [f"seg_{dim}"], f"transactions_clean + {DIM_TABLE[dim]}")
+                [f"seg_{dim}"], _dataset(dim))
         return facts
 
     d = result["drivers"]
@@ -66,14 +73,14 @@ def facts_for_change(result):
     for dd in d["dimensions"]:
         add(f"Split by {dd['dimension']}: mix effect {dd['mix_effect_pp']} pp + rate effect "
             f"{dd['rate_effect_pp']} pp = {round(dd['mix_effect_pp'] + dd['rate_effect_pp'], 2)} pp.",
-            [f"seg_{dd['dimension']}"], f"transactions_clean + {DIM_TABLE[dd['dimension']]}")
+            [f"seg_{dd['dimension']}"], _dataset(dd['dimension']))
 
     m = d.get("mix_driver")
     if m:
         add(f"Largest mix shift: {m['segment']} ({m['dimension']}) went from {m['share_prev_pct']}% to "
             f"{m['share_cur_pct']}% of resolved attempts; its success rate was {m['rate_prev_pct']}% then "
             f"{m['rate_cur_pct']}%. This traffic shift alone contributed {m['segment_mix_effect_pp']} pp.",
-            [f"seg_{m['dimension']}"], f"transactions_clean + {DIM_TABLE[m['dimension']]}")
+            [f"seg_{m['dimension']}"], _dataset(m['dimension']))
 
     r = d.get("rate_driver")
     if r:
@@ -84,7 +91,7 @@ def facts_for_change(result):
         add(f"Largest segment-specific rate change: {r['segment']} ({r['dimension']}) went from "
             f"{r['rate_prev_pct']}% to {r['rate_cur_pct']}%, while all other {r['dimension']} segments went from "
             f"{r['rest_rate_prev_pct']}% to {r['rest_rate_cur_pct']}%. Excess effect {r['excess_rate_effect_pp']} pp; "
-            f"{verdict}.", [f"seg_{r['dimension']}"], f"transactions_clean + {DIM_TABLE[r['dimension']]}")
+            f"{verdict}.", [f"seg_{r['dimension']}"], _dataset(r['dimension']))
 
     dd = result.get("drilldown")
     if dd:
@@ -97,11 +104,11 @@ def facts_for_change(result):
                 days = "; ".join(f"{day}: {daily.loc[day, seg]}% vs {daily.loc[day, 'all others']}%"
                                  for day in bad.index)
                 add(f"{len(bad)} day(s) where {seg} was more than {ANOMALY_GAP_PP} pts below all others: {days}.",
-                    ["drill_daily"], f"transactions_clean + {DIM_TABLE[dd['dimension']]}")
+                    ["drill_daily"], _dataset(dd['dimension']))
             else:
                 add(f"No single day where {seg} was more than {ANOMALY_GAP_PP} pts below all others; "
                     f"the drop is spread across the period.", ["drill_daily"],
-                    f"transactions_clean + {DIM_TABLE[dd['dimension']]}")
+                    _dataset(dd['dimension']))
         fr = dd["failure_reasons"]
         cur = fr[fr["period"] == "current"]
         if len(cur):
@@ -109,7 +116,7 @@ def facts_for_change(result):
             prev_same = fr[(fr["period"] == "previous") & (fr["failure_reason"] == top["failure_reason"])]["failed"].sum()
             add(f"Top failure reason for {seg} in the current period: {top['failure_reason']} with "
                 f"{int(top['failed'])} of {int(cur['failed'].sum())} failures (previous period: {int(prev_same)}).",
-                ["drill_reasons"], f"transactions_clean + {DIM_TABLE[dd['dimension']]}")
+                ["drill_reasons"], _dataset(dd['dimension']))
 
     add(f"PENDING attempts (excluded from success rate): previous {int(t.loc['previous', 'pending'])}, "
         f"current {int(t.loc['current', 'pending'])}.", ["seg_payment_method"], "transactions_clean")
@@ -268,6 +275,9 @@ def allowed_numbers(facts, extra_texts=()):
             for v in f["table"].head(50).to_numpy().ravel():
                 if isinstance(v, numbers.Number) and not pd.isna(v):
                     allowed.add(float(v))
+            # Column totals: "1,500 attempts in total" is a sum code can verify
+            for total in f["table"].select_dtypes("number").sum():
+                allowed.add(float(total))
     # Simple derived numbers people naturally write: absolute values, roundings, truncation
     expanded = set()
     for a in allowed:
@@ -277,8 +287,13 @@ def allowed_numbers(facts, extra_texts=()):
 
 
 def check_numbers(narrative, facts, caveats=()):
-    """Return a list of numbers in the LLM's text that were NOT computed by code (facts or caveats)."""
+    """Return a list of numbers in the LLM's text that were NOT computed by code.
+    The headline states results, so it may only use numbers from facts. Hypotheses and
+    recommendations may also use data-quality numbers from the caveats ("10 failures have no reason").
+    Without this split, a raw count from a caveat (1510 rows before dedup) could pass as the
+    number of attempts (1500) in the headline."""
     allowed = allowed_numbers(facts, caveats)
+    allowed_in_headline = allowed_numbers(facts)
     fact_ids = {f["id"] for f in facts}
     problems = []
     items = [("headline", narrative.get("headline", ""))]
@@ -286,9 +301,10 @@ def check_numbers(narrative, facts, caveats=()):
               for i, h in enumerate(narrative.get("hypotheses", []))]
     items += [(f"recommendation {i + 1}", r.get("text", "")) for i, r in enumerate(narrative.get("recommendations", []))]
     for where, text in items:
+        ok_numbers = allowed_in_headline if where == "headline" else allowed
         for n in numbers_in(text):
             # compare the absolute value too: "11-12 Nov" is read as 11 and -12
-            if not any(abs(n - a) <= 0.051 or abs(abs(n) - a) <= 0.051 for a in allowed):
+            if not any(abs(n - a) <= 0.051 or abs(abs(n) - a) <= 0.051 for a in ok_numbers):
                 problems.append({"where": where, "number": n, "issue": "not found in any fact"})
     for i, h in enumerate(narrative.get("hypotheses", []) + narrative.get("recommendations", [])):
         for e in h.get("evidence", []):

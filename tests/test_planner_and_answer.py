@@ -97,3 +97,49 @@ def test_ad_hoc_fact_cites_the_real_where_clause():
                                       pd.DataFrame({"category": ["food"], "n": [5]}))])
     assert "BETWEEN '2026-11-09' AND '2026-11-15'" in facts[0]["filters"]
     assert facts[0]["dataset"] == "merchants, transactions_clean"
+
+
+def test_quota_and_overload_errors_become_a_short_message(monkeypatch):
+    """Main model out of daily quota, fallback overloaded: a short, actionable message,
+    no retries on the daily quota, raw errors kept for the trace."""
+    import llm
+    from google.genai import errors
+    calls = []
+
+    class FakeModels:
+        def generate_content(self, model, **kw):
+            calls.append(model)
+            if model == llm.MODELS[0]:
+                raise errors.APIError(429, {"error": {"status": "RESOURCE_EXHAUSTED", "message":
+                    "Quota exceeded for metric: generate_content_free_tier_requests, limit: 20"}})
+            raise errors.APIError(503, {"error": {"status": "UNAVAILABLE", "message": "high demand"}})
+
+    class FakeClient:
+        models = FakeModels()
+
+    monkeypatch.setattr(llm, "MODELS", ["main-model", "fallback-model"])
+    monkeypatch.setattr(llm, "_client", FakeClient())
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    with pytest.raises(llm.LLMUnavailable) as info:
+        llm.generate_json("hi")
+    message = str(info.value)
+    assert "daily free-tier quota" in message and "overloaded" in message
+    assert len(message) < 400
+    assert calls.count(llm.MODELS[0]) == 1          # no pointless retries on a daily quota
+    assert len(info.value.details) == 1 + llm.MAX_ATTEMPTS_PER_MODEL
+
+
+def test_headline_cannot_borrow_a_caveat_number():
+    """Real case: the AI wrote '1510 attempts' (the raw row count from the duplicates caveat)
+    when the deduplicated count was 1500. Headlines may only use numbers from facts."""
+    table = pd.DataFrame({"status": ["SUCCESS", "FAILED", "PENDING"], "n": [1351, 145, 4],
+                          "amount": [1455105.59, 162683.15, 3227.63]})
+    facts = [{"id": "F1", "text": "F1 result table", "table": table, "window": "2026-11-15", "filters": ""}]
+    caveats = ["10 duplicate rows (0.66% of 1510 raw rows) were removed",
+               "10 of 145 failed transactions have no failure_reason"]
+    narrative = {"headline": "Yesterday there were 1510 attempts and 1,500 resolved or pending, "
+                             "totalling 1,621,016.37.",
+                 "hypotheses": [{"text": "10 failures lack a reason", "evidence": ["F1"]}],
+                 "recommendations": []}
+    flagged = [p["number"] for p in answer.check_numbers(narrative, facts, caveats)]
+    assert flagged == [1510.0]          # column totals (1500, 1,621,016.37) are verifiable; caveat use is fine below

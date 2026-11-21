@@ -73,7 +73,8 @@ def ask(question, role):
         plan, llm = make_plan(question, role)
         log_llm("plan", llm)
     except Exception as e:
-        out.update(status="error", message=f"Could not plan the question: {e}")
+        out.update(status="error", message=f"Could not plan the question: {e}",
+                   error_details=getattr(e, "details", None))
         return _finish(out, start)
     out["plan"] = plan
     qtype = plan["question_type"]

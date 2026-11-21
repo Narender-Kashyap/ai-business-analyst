@@ -56,6 +56,20 @@ Models: `gemini-3-flash-preview` first, `gemini-flash-lite-latest` as fallback. 
 
 ---
 
+
+### Trying your own role or dimension
+
+The role in the app is a dropdown on purpose. In a real deployment the role comes from the login (SSO/IAM), not from something the user types, so typing "admin" can't grant access. To test your own access rule, add a role to `config/roles.yaml` and restart the app, for example:
+
+```yaml
+  regional_manager_south:
+    description: "South merchants only. No settlement data."
+    allowed_tables: [transactions_clean, merchants, banks, payment_methods]
+    region: south
+```
+
+New segment dimensions and metric definitions go in `config/semantic_layer.yaml` in the same way. No code changes are needed.
+
 ## How it works
 
 ```mermaid
