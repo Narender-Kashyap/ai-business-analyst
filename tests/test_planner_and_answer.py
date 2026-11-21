@@ -143,3 +143,29 @@ def test_headline_cannot_borrow_a_caveat_number():
                  "recommendations": []}
     flagged = [p["number"] for p in answer.check_numbers(narrative, facts, caveats)]
     assert flagged == [1510.0]          # column totals (1500, 1,621,016.37) are verifiable; caveat use is fine below
+
+
+def test_reviewer_key_without_the_main_model_falls_back(monkeypatch):
+    """Another person's key may not have the preview model (404): use the fallback, no retries."""
+    import llm
+    from google.genai import errors
+    calls = []
+
+    class Response:
+        text = '{"ok": true}'
+        usage_metadata = None
+
+    class FakeModels:
+        def generate_content(self, model, **kw):
+            calls.append(model)
+            if model == "main-model":
+                raise errors.APIError(404, {"error": {"status": "NOT_FOUND", "message": "model not found"}})
+            return Response()
+
+    class FakeClient:
+        models = FakeModels()
+
+    monkeypatch.setattr(llm, "MODELS", ["main-model", "fallback-model"])
+    monkeypatch.setattr(llm, "_client", FakeClient())
+    result = llm.generate_json("hi")
+    assert result["model"] == "fallback-model" and calls == ["main-model", "fallback-model"]

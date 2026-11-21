@@ -8,7 +8,8 @@ from google.genai import errors, types
 
 load_dotenv(override=True)      # .env wins over any stale Windows variable
 # Main model first, then fallback. Can be overridden in .env: GEMINI_MODELS=model_a,model_b
-MODELS = os.getenv("GEMINI_MODELS", "gemini-3-flash-preview,gemini-flash-lite-latest").split(",")
+MODELS = [m.strip() for m in os.getenv("GEMINI_MODELS", "gemini-3-flash-preview,gemini-flash-lite-latest").split(",")
+          if m.strip()] or ["gemini-3-flash-preview", "gemini-flash-lite-latest"]
 RETRYABLE_CODES = {429, 500, 502, 503, 504}                     # rate limit / server busy
 MAX_ATTEMPTS_PER_MODEL = 3
 
