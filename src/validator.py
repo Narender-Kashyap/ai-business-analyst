@@ -60,7 +60,10 @@ def validate(sql, role):
         if name in cte_names:
             continue
         if name not in allowed_tables:
-            errors.append(f"Access denied: role '{role}' cannot read table '{name}'.")
+            if name in SEMANTIC["tables"]:               # a real table this role may not read: final
+                errors.append(f"Access denied: role '{role}' cannot read table '{name}'.")
+            else:                                        # not part of the model at all, e.g. the raw log
+                errors.append(f"Unknown table '{name}'. Use only: {', '.join(sorted(allowed_tables))}.")
 
     # 4. Columns: must exist in the semantic layer (catches hallucinated columns)
     known_columns = {c for t in SEMANTIC["tables"].values() for c in t["columns"]}

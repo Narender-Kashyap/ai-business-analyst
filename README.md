@@ -22,6 +22,8 @@ Demo video: link in the submission form.
 
 ## Running it
 
+Needs Python 3.11 or newer (tested on 3.11, 3.12 and 3.13) and a free Gemini API key from https://aistudio.google.com/apikey.
+
 ```bash
 python -m venv .venv
 # Windows: .\.venv\Scripts\Activate.ps1      macOS/Linux: source .venv/bin/activate

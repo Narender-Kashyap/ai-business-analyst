@@ -148,6 +148,9 @@ def check_plan(plan):
             notes.append(f"No comparison period given: comparing with the {length} days before "
                          f"({comp[0]} to {comp[1]}).")
         plan["windows"] = {"current": tuple(cur), "previous": tuple(comp)}
+        metric = str(plan.get("metric") or "").lower().strip().replace(" ", "_")
+        plan["metric"] = {"sr": "success_rate", "successrate": "success_rate", "volume": "attempts",
+                          "transactions": "attempts", "successful": "successful_txns"}.get(metric, metric)
         if not plan.get("metric"):
             plan["metric"] = "success_rate"
             notes.append("No metric named: assuming success_rate.")

@@ -20,7 +20,7 @@ from validator import validate
 TRACE_FILE = Path("traces/trace.jsonl")
 # Only honest mistakes may be sent back to the model for repair. Safety and access rejections are
 # final: asking the model to "fix" them would be asking it to get around the rules.
-REPAIRABLE_PREFIXES = ("Unknown column", "SQL could not be parsed", "Execution failed")
+REPAIRABLE_PREFIXES = ("Unknown column", "Unknown table", "SQL could not be parsed", "Execution failed")
 
 
 def tables_in(sql):

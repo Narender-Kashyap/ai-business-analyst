@@ -2,6 +2,7 @@
 
 Run from the project root:  python -m streamlit run app.py
 """
+import os
 import sys
 from pathlib import Path
 
@@ -247,6 +248,9 @@ with st.sidebar:
     st.caption(f"Tables: {', '.join(ROLES[role]['allowed_tables'])}")
     st.divider()
     st.caption(f"Data covers {profile['start_date']} to {profile['end_date']} (synthetic, seeded).")
+    if not os.getenv("GEMINI_API_KEY"):
+        st.warning("No GEMINI_API_KEY found. Copy `.env.example` to `.env` and add a key to ask questions. "
+                   "The validator demo tab works without one.")
     st.markdown("**Example questions**")
     for ex in EXAMPLES:
         if st.button(ex, width="stretch"):

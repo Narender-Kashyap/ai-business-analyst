@@ -75,3 +75,10 @@ def test_dates_outside_the_data_are_a_warning_not_a_block():
 
 def test_unparseable_sql_is_blocked():
     assert not validate("SELEC FROM WHERE", CENTRAL).ok
+
+
+def test_unknown_table_is_repairable_but_forbidden_table_is_final():
+    raw = validate("SELECT COUNT(*) FROM transactions", CENTRAL)
+    assert raw.errors[0].startswith("Unknown table")            # the model can fix this
+    settled = validate("SELECT * FROM settlements", NORTH)
+    assert settled.errors[0].startswith("Access denied")        # this one is never repaired

@@ -81,3 +81,38 @@ def test_planner_failure_never_crashes(use_fake_llm, monkeypatch):
     monkeypatch.setattr(planner, "generate_json", broken)
     out = pipeline.ask("anything", "central_analyst")
     assert out["status"] == "error"
+
+
+# ---- robustness to how a reviewer might phrase things ----
+
+def test_filter_value_in_different_case_still_matches(use_fake_llm):
+    use_fake_llm(plan("explain_change", metric="success_rate",
+                      filters=[{"dimension": "category", "value": "Travel"}]))       # alias + capital T
+    out = pipeline.ask("Why did success rate drop for Travel merchants?", "central_analyst")
+    assert out["status"] == "ok"
+    assert out["plan"]["filters"] == [{"dimension": "merchant_category", "value": "travel"}]
+    assert out["analysis"]["drivers"]["rate_driver"]["segment"] == "Bank C"
+
+
+def test_metric_name_variants_are_understood(use_fake_llm):
+    use_fake_llm(plan("explain_change", metric="Success Rate"))
+    out = pipeline.ask("Why did it drop?", "central_analyst")
+    assert out["status"] == "ok" and out["plan"]["metric"] == "success_rate"
+
+
+def test_raw_table_is_repaired_to_the_clean_view(use_fake_llm, monkeypatch):
+    monkeypatch.setattr(pipeline, "repair_sql",
+                        lambda *a: ("SELECT COUNT(*) AS n FROM transactions_clean", {}))
+    use_fake_llm(plan("ad_hoc", queries=[{"id": "q1", "purpose": "count",
+                                          "sql": "SELECT COUNT(*) AS n FROM transactions"}]))
+    out = pipeline.ask("How many transactions are there?", "central_analyst")
+    assert out["status"] == "ok" and out["queries"][0]["repaired"]
+    assert out["facts"][0]["table"]["n"].iloc[0] == 84_000
+
+
+def test_missing_api_key_gives_a_clear_message(monkeypatch):
+    import llm
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(llm, "_client", None)
+    out = pipeline.ask("Why did the success rate drop?", "central_analyst")
+    assert out["status"] == "error" and "GEMINI_API_KEY is not set" in out["message"]

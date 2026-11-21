@@ -18,6 +18,9 @@ _client = None
 def get_client():
     global _client
     if _client is None:
+        if not os.getenv("GEMINI_API_KEY"):
+            raise RuntimeError("GEMINI_API_KEY is not set. Copy .env.example to .env and put your Gemini "
+                               "API key in it (https://aistudio.google.com/apikey).")
         _client = genai.Client(
             api_key=os.getenv("GEMINI_API_KEY"),
             http_options=types.HttpOptions(api_version="v1beta"),   # preview models live in v1beta
@@ -58,7 +61,9 @@ def generate_json(prompt):
                     time.sleep(2 ** attempt)                  # 2s, 4s: exponential backoff
                     continue
                 break                                         # not retryable -> next model
-            except Exception as e:                            # network error etc.
-                failures.append(f"{model} attempt {attempt}: {type(e).__name__}")
+            except Exception as e:                            # network error, missing key etc.
+                failures.append(f"{model} attempt {attempt}: {type(e).__name__}: {e}")
+                if "GEMINI_API_KEY is not set" in str(e):
+                    raise
                 break
     raise RuntimeError("All models failed: " + "; ".join(failures))

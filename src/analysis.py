@@ -150,18 +150,30 @@ def run_checked(sql, role, conn, query_id, purpose, log):
     return df
 
 
+# Names the model might use for a dimension -> the name in the semantic layer
+DIMENSION_ALIASES = {"category": "merchant_category", "merchant category": "merchant_category",
+                     "method": "payment_method", "payment method": "payment_method",
+                     "method_name": "payment_method", "bank_name": "bank", "issuer": "bank",
+                     "merchant_region": "region"}
+
+
 def check_filters(filters, role, conn):
-    """Filter values must exist in the data (visible to this role). Prevents typos and injection."""
+    """Filter values must exist in the data visible to this role. Prevents typos, injection and
+    cross-region access. Also normalises names: 'category' -> merchant_category, 'Travel' -> 'travel'
+    (SQLite compares text exactly, so the value must match how it is stored)."""
     for f in filters:
+        f["dimension"] = DIMENSION_ALIASES.get(str(f["dimension"]).lower().strip(), f["dimension"])
         if f["dimension"] not in DIMENSIONS:
             raise AnalysisError(f"Unknown filter dimension '{f['dimension']}'. "
                                 f"Known: {', '.join(DIMENSIONS)}.")
         d = DIMENSIONS[f["dimension"]]
         sql = f"SELECT DISTINCT {d['column']} AS v FROM transactions_clean t {d['join']} LIMIT 1000"
-        values = {str(v).lower() for v in pd.read_sql_query(sql, conn)["v"].dropna()}
-        if str(f["value"]).lower() not in values:
+        stored = {str(v).lower(): str(v) for v in pd.read_sql_query(sql, conn)["v"].dropna()}
+        key = str(f["value"]).lower().strip()
+        if key not in stored:
             raise AnalysisError(f"Value '{f['value']}' for {f['dimension']} is not visible to role "
-                                f"'{role}'. Visible values: {', '.join(sorted(values))}.")
+                                f"'{role}'. Visible values: {', '.join(sorted(stored.values()))}.")
+        f["value"] = stored[key]                      # use the exact stored spelling
 
 
 # ---------- The maths ----------
