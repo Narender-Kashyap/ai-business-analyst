@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import sqlglot
 import streamlit as st
 import yaml
 
@@ -101,9 +102,16 @@ def render_answer(out):
     elif res:
         st.plotly_chart(chart_weekly(res["weekly_trend"], res["windows"]), width="stretch", theme=None)
 
-    st.markdown("### ② Facts *(computed by code from executed queries)*")
-    st.dataframe(pd.DataFrame([{k: f[k] for k in ["id", "text", "dataset", "filters", "window", "query_ids"]}
-                               for f in out["facts"]]), hide_index=True, width="stretch")
+    steps = investigation_steps(out)
+    render_steps(out, steps)
+
+    st.markdown("### ③ Facts *(computed by code from executed queries)*")
+    step_of = {q["id"]: s["n"] for s in steps if s.get("query") for q in [s["query"]]}
+    st.dataframe(pd.DataFrame([{
+        "id": f["id"], "fact": f["text"],
+        "from step": ", ".join(str(step_of[q]) for q in f["query_ids"] if q in step_of) or "-",
+        "dataset": f["dataset"], "filters": f["filters"], "time window": f["window"]}
+        for f in out["facts"]]), hide_index=True, width="stretch")
     for f in out["facts"]:
         if "table" in f:
             fig = chart_table(f["table"], f["text"].split(":")[0])
@@ -112,34 +120,117 @@ def render_answer(out):
             st.caption(f"{f['id']} result table")
             st.dataframe(f["table"], hide_index=True)
 
-    st.markdown("### ③ Hypotheses *(plausible explanations - not proven)*")
+    st.markdown("### ④ Hypotheses *(plausible explanations - not proven)*")
     for h in n.get("hypotheses", []):
         flag = " ⚠️ *contains an unverified number*" if h.get("unverified") else ""
         st.markdown(f"- **[{h.get('confidence', '?')} confidence]** {h['text']}  \n"
                     f"  Evidence: {', '.join(h.get('evidence', [])) or '—'} • Would confirm: {h.get('would_confirm', '—')}{flag}")
 
-    st.markdown("### ④ Recommended next steps")
+    st.markdown("### ⑤ Recommended next steps")
     for r in n.get("recommendations", []):
         flag = " ⚠️ *unverified number*" if r.get("unverified") else ""
         st.markdown(f"- {r['text']}  (evidence: {', '.join(r.get('evidence', [])) or '—'}){flag}")
 
-    st.markdown("### ⑤ Caveats and data-quality warnings")
+    st.markdown("### ⑥ Caveats and data-quality warnings")
     for c in out["caveats"]:
         st.markdown(f"- {c}")
-    render_queries(out)
+    render_trace(out)
 
 
-def render_queries(out):
-    with st.expander(f"⑥ Query evidence ({len(out['queries'])} queries, all validated before running)"):
-        for q in out["queries"]:
-            ok = q.get("ok", True)
-            st.markdown(f"**{q['id']}** — {q['purpose']}  •  source: `{q.get('source')}`  •  "
-                        f"{'✅ ran' if ok else '❌ blocked'}  •  rows: {q.get('rows', '—')}  •  {q.get('seconds', '—')}s")
-            st.code(q["sql"], language="sql")
+def step_title(q, out):
+    """Plain-English title for one executed query."""
+    drill = (out.get("analysis") or {}).get("drilldown") or {}
+    qid = q["id"]
+    if qid.startswith("seg_"):
+        dim = qid[4:].replace("_", " ")
+        return f"Compare every {dim} between the two periods (traffic share and success rate of each)"
+    if qid == "weekly_trend":
+        return "Weekly success rate over all the data (is this drop unusual?)"
+    if qid == "drill_daily":
+        return f"Drill into {drill.get('segment', 'the top driver')}: daily success rate vs everyone else"
+    if qid == "drill_reasons":
+        return f"Drill into {drill.get('segment', 'the top driver')}: why its payments failed"
+    return f"{q['purpose']} (SQL written by Gemini, checked by the validator)"
+
+
+def investigation_steps(out):
+    """The investigation in the order it happened: plan -> queries -> analysis -> checks -> wording."""
+    plan = out.get("plan") or {}
+    steps = [{"n": 1, "title": f"Understand the question → type `{plan.get('question_type')}`, "
+                               f"metric `{plan.get('metric')}`", "detail": plan.get("interpretation", "")}]
+    analysis_step = None
+    if out.get("analysis") and out["analysis"]["metric"] == "success_rate":
+        d = out["analysis"]["drivers"]
+        rd = d.get("rate_driver") or {}
+        analysis_step = {"title": "Split the change into mix vs rate for each dimension and test which "
+                                  "segments changed more than chance allows (this picks what to drill into)",
+                         "detail": f"Largest traffic shift: {(d.get('mix_driver') or {}).get('segment')}. "
+                                   f"Largest segment-specific drop: {rd.get('segment')} "
+                                   f"({'significant' if rd.get('significant') else 'not significant'})."}
+    for q in out["queries"]:
+        if analysis_step and q["id"].startswith("drill_"):      # the analysis decides the drill-down
+            steps.append({"n": len(steps) + 1, **analysis_step})
+            analysis_step = None
+        steps.append({"n": len(steps) + 1, "title": step_title(q, out), "query": q})
+    if analysis_step:                                           # no drill-down (nothing significant)
+        steps.append({"n": len(steps) + 1, **analysis_step})
+    warns = sum(x["status"] == "warn" for x in out["dq"])
+    steps.append({"n": len(steps) + 1, "title": f"Data-quality checks ({len(out['dq'])} checks, {warns} warnings "
+                  "→ caveats)", "detail": ""})
+    steps.append({"n": len(steps) + 1, "title": "Gemini writes hypotheses and recommendations from the facts; "
+                  "code checks every number it wrote",
+                  "detail": "All numbers verified." if not out["number_check"]
+                            else f"{len(out['number_check'])} number(s) could not be verified (marked below)."})
+    return steps
+
+
+def pretty_sql(sql):
+    """Format SQL over several lines for reading (display only; the executed SQL is unchanged)."""
+    try:
+        return sqlglot.transpile(sql, read="sqlite", write="sqlite", pretty=True)[0]
+    except Exception:
+        return sql
+
+
+def render_steps(out, steps):
+    facts_of = {}
+    for f in out["facts"]:
+        for q in f["query_ids"]:
+            facts_of.setdefault(q, []).append(f["id"])
+    st.markdown("### ② How the answer was reached *(in the order it happened)*")
+    for s in steps:
+        q = s.get("query")
+        if not q:
+            st.markdown(f"**Step {s['n']}.** {s['title']}" + (f"  \n{s['detail']}" if s["detail"] else ""))
+            continue
+        ok = q.get("ok", True)
+        status = f"✅ {q.get('rows', 0)} rows in {q.get('seconds', '—')}s" if ok else "❌ blocked"
+        made = ", ".join(facts_of.get(q["id"], [])) or "no facts (context only)"
+        with st.expander(f"Step {s['n']}. {s['title']} — {status} — produced: {made}"):
+            st.caption(f"Query id `{q['id']}` • written by: {'code (semantic layer)' if q.get('source') == 'code' else 'Gemini'}"
+                       " • checked by the validator before running")
+            st.code(pretty_sql(q["sql"]), language="sql")
             for e in q.get("errors") or []:
                 st.error(e)
             for w in q.get("warnings") or []:
                 st.caption(f"validator: {w}")
+
+
+def render_queries(out):
+    """Used when there is no full answer (refused, blocked, failed): show whatever queries were tried."""
+    if out["queries"]:
+        with st.expander(f"Query evidence ({len(out['queries'])} queries, all validated before running)"):
+            for q in out["queries"]:
+                ok = q.get("ok", True)
+                st.markdown(f"**{q['id']}** — {q['purpose']}  •  {'✅ ran' if ok else '❌ blocked'}  •  "
+                            f"rows: {q.get('rows', '—')}")
+                st.code(pretty_sql(q["sql"]), language="sql")
+                for e in q.get("errors") or []:
+                    st.error(e)
+    render_trace(out)
+
+
+def render_trace(out):
     with st.expander("⑦ Trace (models, tokens, latency)"):
         st.dataframe(pd.DataFrame(out["llm_calls"]), hide_index=True)
         st.caption(f"Total time {out['total_s']}s • narrative source: {out.get('narrative_source', '—')}")
