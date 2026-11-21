@@ -1,0 +1,90 @@
+# Semantic layer: the agreed business definitions the AI must use.
+# The AI reads this file; it must NOT invent its own metric formulas.
+
+data_coverage:
+  start_date: "2026-09-21"
+  end_date: "2026-11-15"
+  as_of_date: "2026-11-16"   # "today" for analysis = day after data ends
+  timezone: "IST"
+
+time_rules:
+  - "'last week' = most recent complete Monday-Sunday week before as_of_date (2026-11-09 to 2026-11-15)."
+  - "'week over week' = last week vs the week before it (2026-11-02 to 2026-11-08)."
+  - "If no time period is given, use last week vs previous week and state this as an assumption."
+  - "Filter dates with DATE(txn_ts) BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'."
+  - "Week bucket expression: DATE(txn_ts, 'weekday 0', '-6 days') gives the Monday of the week."
+
+tables:
+  transactions_clean:
+    description: "One row per payment attempt. Deduplicated view of the raw transactions log."
+    columns:
+      txn_id: "Unique payment attempt ID"
+      txn_ts: "Timestamp of the attempt, text 'YYYY-MM-DD HH:MM:SS'"
+      merchant_id: "FK to merchants.merchant_id"
+      bank_id: "FK to banks.bank_id; can be NULL (missing data)"
+      method_id: "FK to payment_methods.method_id"
+      amount: "Payment amount in INR"
+      status: "'SUCCESS', 'FAILED' or 'PENDING'"
+      failure_reason: "Reason code for FAILED rows; can be NULL"
+  merchants:
+    description: "One row per merchant."
+    columns:
+      merchant_id: "Primary key"
+      merchant_name: "Display name"
+      category: "grocery, electronics, travel, food, utilities"
+      region: "north, south, east, west"
+  banks:
+    description: "One row per bank."
+    columns:
+      bank_id: "Primary key"
+      bank_name: "Bank A ... Bank F"
+  payment_methods:
+    description: "One row per payment method."
+    columns:
+      method_id: "Primary key"
+      method_name: "UPI, Wallet, Credit Card, Debit Card, Net Banking"
+  settlements:
+    description: "Second source (finance system): settled successful payments per merchant per day. Cutoff 23:30, so late payments settle the next day."
+    columns:
+      settlement_date: "Date settled, text 'YYYY-MM-DD'"
+      merchant_id: "FK to merchants.merchant_id"
+      txn_count: "Number of settled successful payments"
+      gross_amount: "Settled amount in INR"
+
+joins:
+  - "transactions_clean.merchant_id = merchants.merchant_id"
+  - "transactions_clean.bank_id = banks.bank_id"
+  - "transactions_clean.method_id = payment_methods.method_id"
+  - "settlements.merchant_id = merchants.merchant_id"
+
+metrics:
+  success_rate:
+    description: "Percent of RESOLVED attempts that succeeded. PENDING is excluded from numerator and denominator."
+    sql: "ROUND(100.0 * SUM(status = 'SUCCESS') / NULLIF(SUM(status IN ('SUCCESS','FAILED')), 0), 2)"
+  attempts:
+    description: "Number of payment attempts (all statuses)."
+    sql: "COUNT(*)"
+  successful_txns:
+    description: "Number of successful payments."
+    sql: "SUM(status = 'SUCCESS')"
+  failed_txns:
+    description: "Number of failed payments."
+    sql: "SUM(status = 'FAILED')"
+  pending_count:
+    description: "Number of unresolved attempts. Always report next to success_rate."
+    sql: "SUM(status = 'PENDING')"
+  gmv:
+    description: "Gross merchandise value: total amount of SUCCESSFUL payments, INR."
+    sql: "ROUND(SUM(CASE WHEN status = 'SUCCESS' THEN amount ELSE 0 END), 2)"
+  traffic_share:
+    description: "A segment's share of attempts within a period, percent. Compute counts per segment; share is derived in analysis."
+    sql: "COUNT(*)"
+
+dimensions:
+  payment_method: "payment_methods.method_name"
+  bank: "banks.bank_name"
+  merchant_category: "merchants.category"
+  region: "merchants.region"
+  failure_reason: "transactions_clean.failure_reason"
+  day: "DATE(transactions_clean.txn_ts)"
+  week_start: "DATE(transactions_clean.txn_ts, 'weekday 0', '-6 days')"

@@ -1,0 +1,11 @@
+# Access policy. Enforced in code (validator + database connection), not by the AI.
+
+roles:
+  central_analyst:
+    description: "Central analytics team. All regions, all datasets."
+    allowed_tables: [transactions_clean, merchants, banks, payment_methods, settlements]
+    region: null
+  regional_manager_north:
+    description: "Regional manager. North-region merchants only. No settlement (finance) data."
+    allowed_tables: [transactions_clean, merchants, banks, payment_methods]
+    region: north

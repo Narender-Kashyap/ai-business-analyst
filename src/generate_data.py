@@ -155,6 +155,9 @@ def save_to_sqlite(tables):
             if "txn_ts" in out.columns:
                 out["txn_ts"] = out["txn_ts"].dt.strftime("%Y-%m-%d %H:%M:%S")
             out.to_sql(name, conn, if_exists="replace", index=False)
+        # Clean view: duplicates removed. The AI only ever queries this view.
+        conn.execute("DROP VIEW IF EXISTS transactions_clean")
+        conn.execute("CREATE VIEW transactions_clean AS SELECT DISTINCT * FROM transactions")
 
 
 def main():
