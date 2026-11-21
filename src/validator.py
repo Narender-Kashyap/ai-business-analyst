@@ -1,17 +1,23 @@
 """SQL validator: checks AI-generated SQL in CODE before it is executed.
 
 Rules: one statement, read-only SELECT, only tables the role may read,
-only known columns, no other regions for region-restricted roles, forced LIMIT.
+only known columns, no other regions for region-restricted roles,
+warn on dates outside the data, forced LIMIT.
 """
+import re
 from dataclasses import dataclass, field
 
 import sqlglot
 import yaml
 from sqlglot import exp
 
+import db
+
 SEMANTIC = yaml.safe_load(open("config/semantic_layer.yaml", encoding="utf-8"))
 ROLES = yaml.safe_load(open("config/roles.yaml", encoding="utf-8"))["roles"]
-REGIONS = {"north", "south", "east", "west"}
+PROFILE = db.data_profile()                      # facts read from the data, not hardcoded
+REGIONS = set(PROFILE["regions"])
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}")   # starts with YYYY-MM-DD
 MAX_ROWS = 1000
 
 # Statement types that change data or the database itself
@@ -76,7 +82,16 @@ def validate(sql, role):
     if errors:
         return ValidationResult(False, sql, sorted(set(errors)), warnings)
 
-    # 6. Force a row limit on the outer query
+    # 6. Dates outside the data's coverage -> warning (results would be empty or partial)
+    for lit in tree.find_all(exp.Literal):
+        value = str(lit.this)
+        if lit.is_string and DATE_PATTERN.match(value):
+            day = value[:10]
+            if day < PROFILE["start_date"] or day > PROFILE["end_date"]:
+                warnings.append(f"Date {day} is outside the data coverage "
+                                f"({PROFILE['start_date']} to {PROFILE['end_date']}); results may be empty or partial.")
+
+    # 7. Force a row limit on the outer query
     limit = tree.args.get("limit")
     if limit is None:
         tree = tree.limit(MAX_ROWS)

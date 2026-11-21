@@ -1,16 +1,14 @@
 # Semantic layer: the agreed business definitions the AI must use.
 # The AI reads this file; it must NOT invent its own metric formulas.
 
-data_coverage:
-  start_date: "2026-09-21"
-  end_date: "2026-11-15"
-  as_of_date: "2026-11-16"   # "today" for analysis = day after data ends
-  timezone: "IST"
-
+# Date coverage (start, end) and "today" are computed from the database at runtime,
+# so these rules work on any data period.
 time_rules:
-  - "'last week' = most recent complete Monday-Sunday week before as_of_date (2026-11-09 to 2026-11-15)."
-  - "'week over week' = last week vs the week before it (2026-11-02 to 2026-11-08)."
+  - "'today' (as_of_date) = the day after the last date in the data."
+  - "'last week' = the most recent complete Monday-Sunday week on or before the last data date."
+  - "'week over week' = last week vs the week before it."
   - "If no time period is given, use last week vs previous week and state this as an assumption."
+  - "Never query dates outside the data coverage; say so if the user asks for them."
   - "Filter dates with DATE(txn_ts) BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'."
   - "Week bucket expression: DATE(txn_ts, 'weekday 0', '-6 days') gives the Monday of the week."
 
@@ -88,3 +86,19 @@ dimensions:
   failure_reason: "transactions_clean.failure_reason"
   day: "DATE(transactions_clean.txn_ts)"
   week_start: "DATE(transactions_clean.txn_ts, 'weekday 0', '-6 days')"
+
+# Dimensions the analysis engine can segment by. Code builds SQL from these,
+# so "why did X change" queries never depend on the LLM writing SQL.
+segment_dimensions:
+  payment_method:
+    join: "LEFT JOIN payment_methods pm ON t.method_id = pm.method_id"
+    column: "pm.method_name"
+  bank:
+    join: "LEFT JOIN banks b ON t.bank_id = b.bank_id"
+    column: "b.bank_name"
+  merchant_category:
+    join: "LEFT JOIN merchants m ON t.merchant_id = m.merchant_id"
+    column: "m.category"
+  region:
+    join: "LEFT JOIN merchants m ON t.merchant_id = m.merchant_id"
+    column: "m.region"

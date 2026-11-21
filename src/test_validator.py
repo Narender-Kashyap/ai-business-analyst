@@ -11,6 +11,8 @@ CASES = [
      "FROM transactions_clean t JOIN payment_methods pm ON t.method_id = pm.method_id GROUP BY pm.method_name", True),
     ("CTE query", "central_analyst",
      "WITH w AS (SELECT DATE(txn_ts) AS d, COUNT(*) AS n FROM transactions_clean GROUP BY d) SELECT d, n FROM w", True),
+    ("date outside coverage (warning only)", "central_analyst",
+     "SELECT COUNT(*) AS n FROM transactions_clean WHERE DATE(txn_ts) BETWEEN '2025-01-01' AND '2025-01-31'", True),
     ("delete statement", "central_analyst", "DELETE FROM banks", False),
     ("drop table", "central_analyst", "DROP TABLE transactions", False),
     ("two statements (injection)", "central_analyst", "SELECT 1; DROP TABLE banks", False),
