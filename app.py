@@ -89,10 +89,12 @@ def render_answer(out):
         c1.caption("**How to read:** each dot is one week's success rate. Orange = the period you asked "
                    "about. A sudden drop after a flat line means something changed that week.")
         c2.plotly_chart(chart_mix_rate(d), width="stretch", theme=None)
-        c2.caption(f"**How to read:** the total change ({d['delta_pp']} pts) split two ways, once per "
-                   "dimension. Blue = traffic moved between segments (mix). Orange = segments themselves "
-                   "got worse or better (rate). A dimension with a big blue bar explains part of the change "
-                   "by traffic shifting.")
+        c2.caption(f"**How to read:** each row splits the same {d['delta_pp']}-point change in two, using "
+                   "one way of grouping the traffic. **Blue (mix)** = part caused by traffic moving between "
+                   "groups, e.g. more payments going to a weaker payment method. **Orange (rate)** = part "
+                   "caused by the groups themselves getting worse or better. A row with a big blue bar means "
+                   "the traffic shift happened along that grouping. Hover over a row to see both parts. "
+                   "Values are rounded to 2 decimals.")
         c3, c4 = st.columns(2)
         m = d.get("mix_driver")
         if m:

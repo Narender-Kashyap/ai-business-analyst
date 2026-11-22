@@ -44,23 +44,40 @@ def chart_weekly(trend, windows):
     return fig
 
 
+DIM_LABELS = {"payment_method": "Payment method", "bank": "Bank", "merchant_category": "Merchant category",
+              "region": "Region"}
+
+
 def chart_mix_rate(drivers):
-    dims = pd.DataFrame(drivers["dimensions"])
+    """One row per dimension. Each row splits the SAME total change into mix (blue) + rate (orange).
+    Hovering a row shows both parts in words, with their sum."""
+    dims = pd.DataFrame(drivers["dimensions"]).iloc[::-1]          # first dimension at the top
+    labels = [DIM_LABELS.get(d, d.replace("_", " ").capitalize()) for d in dims["dimension"]]
+    total = drivers["delta_pp"]
+
+    def text(values):                                              # no "0.00" clutter
+        return [f"{v:+.2f}" if abs(v) >= 0.005 else "" for v in values]
+
     fig = go.Figure()
-    fig.add_bar(y=dims["dimension"], x=dims["mix_effect_pp"], name="Mix effect (traffic shift)",
-                orientation="h", marker_color=BLUE, texttemplate="%{x:.2f}", textposition="outside",
-                cliponaxis=False)
-    fig.add_bar(y=dims["dimension"], x=dims["rate_effect_pp"], name="Rate effect (segments got worse/better)",
-                orientation="h", marker_color=ORANGE, texttemplate="%{x:.2f}", textposition="outside",
-                cliponaxis=False)
-    fig.update_traces(hovertemplate="<b>%{y}</b><br>%{fullData.name}: %{x:.2f} pts<extra></extra>")
+    # In a horizontal grouped bar the first trace is drawn lowest, so add rate first (mix on top)
+    fig.add_bar(y=labels, x=dims["rate_effect_pp"], name="Rate: segments themselves got worse or better",
+                orientation="h", marker_color=ORANGE, text=text(dims["rate_effect_pp"]), textposition="outside",
+                cliponaxis=False,
+                hovertemplate=f"Rate (segments got worse/better): %{{x:+.2f}} pts<br>"
+                              f"Mix + rate = {total:+.2f} pts<extra></extra>")
+    fig.add_bar(y=labels, x=dims["mix_effect_pp"], name="Mix: traffic moved between segments",
+                orientation="h", marker_color=BLUE, text=text(dims["mix_effect_pp"]), textposition="outside",
+                cliponaxis=False,
+                hovertemplate="Mix (traffic moved between segments): %{x:+.2f} pts<extra></extra>")
+    fig.update_layout(legend_traceorder="reversed")                 # legend still lists mix first
     fig.update_layout(barmode="group", bargap=0.3, bargroupgap=0.1)
-    fig = base_layout(fig, f"Change of {drivers['delta_pp']} pp = mix + rate (per dimension)", height=320,
-                      hovermode="closest")
+    fig = base_layout(fig, f"Where did the {total:+.2f} pt change come from?", height=340,
+                      hovermode="y unified")
     values = dims[["mix_effect_pp", "rate_effect_pp"]].to_numpy()
     low, high = min(values.min(), 0), max(values.max(), 0)       # works for a rise AND a decline
     pad = 0.25 * (high - low) + 0.1                              # room for the value labels
-    fig.update_xaxes(title="percentage points", range=[low - pad, high + pad])
+    fig.update_xaxes(title="percentage points", range=[low - pad, high + pad],
+                     zeroline=True, zerolinecolor="#999999")
     return fig
 
 
